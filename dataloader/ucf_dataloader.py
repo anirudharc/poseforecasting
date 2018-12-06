@@ -9,23 +9,21 @@ import cv2
 import os
 import numpy as np
 import os.path
+import json as json
+from tqdm import tqdm
 
 BASE_DIR = os.getcwd()
 DATA_DIR = '/media/bighdd7/arayasam/dataset/UCF101'
-# DATA_DIR = '/home/ubuntu/dataset/UCF101'
 RGB_DIR  = DATA_DIR + '/jpegs_256/'
 POSE_DIR = DATA_DIR + '/openpose_output/'
+UCF_LIST = BASE_DIR + '/dataloader/UCF_list/'
+VIDEO_DICT = BASE_DIR + '/dataloader/'
 
-# POTION_DIR = DATA_DIR + '/potion/'
-
-UCF_LIST = BASE_DIR + '/UCF_list/'
-VIDEO_DICT = BASE_DIR
-
+CNV_POSE = "/media/bighdd1/arayasam/poseforecasting/preprocess/heatmaps/"
 # # Set randome seed
-# torch.random.manual_seed(args.seed)                                                                │
-# np.random.seed(args.seed)                                                                          │
+# torch.random.manual_seed(args.seed)
+# np.random.seed(args.seed)
 # torch.cuda.manual_seed_all(args.seed) 
-
 
 class ucf_dataset(Dataset):  
     def __init__(self, dic, rgb_dir, pose_dir, mode, transform=None):
@@ -40,17 +38,63 @@ class ucf_dataset(Dataset):
     def __len__(self):
         return len(self.keys)
 
+    def convert(self, pose_path, video_name):
+        
+        heatmap_path = os.path.join(CNV_POSE,video_name) + ".npz"
+        video_path = POSE_DIR + "v_" + video_name
+
+        if os.path.isfile(heatmap_path):
+            data = np.load(heatmap_path)
+            openpose_npy, occlusion, frame_mask = data['heatmap'], \
+                                    data['occlusion'], data['frame_mask']
+
+        else:
+            frame_mask = []
+            occlusion = []
+            openpose_npy = np.empty((0,25,3))
+            
+            for idx, frame in enumerate(sorted(os.listdir(video_path))):
+
+                frame_path = os.path.join(video_path, frame)
+                with open(frame_path, "r") as fp:
+                    f_json = json.load(fp)
+                
+                # Filter frame: No personn , add more filers...
+                if len(f_json['people']) > 0:
+                    # Note frameID
+                    frame_mask.append(idx)
+
+                    # Note if joints are occluded
+                    if 0 in f_json['people'][0]['pose_keypoints_2d']:
+                        occlusion.append(1)
+                    else:
+                        occlusion.append(0)
+
+                    # Append heatmap for current frame
+                    pose_list = f_json['people'][0]['pose_keypoints_2d']
+                    pose_np = np.asarray(pose_list).reshape(-1, 3)
+                    openpose_npy = np.append(openpose_npy, np.expand_dims(pose_np, axis=0), axis=0)
+
+            #### Save as .npz file
+            save_path = CNV_POSE + "v_" + video_name + ".npz"
+            np.savez(save_path, heatmap=openpose_npy, occlusion=occlusion, frameId=frame_mask)
+
+        return openpose_npy, occlusion, frame_mask
+
     def load_ucf_image(self, video_name):
-        rgb_path = self.rgb_dir + 'v_' + video_name + '/'
+        rgb_path = self.rgb_dir + 'v_' + video_name + '/' + "frame000001.jpg"
         pose_path = self.pose_dir + 'v_' + video_name + '/'
-  
-        img = self.potion_transform(video_name)
 
-        img = Image.fromarray(img)
-        transformed_img = self.transform(img)
-        img.close()
+        # image = Image.open(open(rgb_path, 'rb'))
+        image = cv2.imread(rgb_path)
+        openpose_npy, occlusion, frame_mask = self.convert(pose_path, video_name)
 
-        return transformed_img
+        # # Transformations of images if needed
+        # img = Image.fromarray(img)
+        # transformed_img = self.transform(img)
+        # img.close()
+
+        return image, openpose_npy, occlusion, frame_mask
 
     def __getitem__(self, idx):
 
@@ -69,13 +113,11 @@ class ucf_dataset(Dataset):
         data ={}
         if self.mode=='train':
             # Maintaining a dict for future extension of features
-            data['potion'] = self.load_ucf_image(video_name)
-                    
+            data['image'], data['heatmaps'], data['occlusion'], data['frameId'] = self.load_ucf_image(video_name)
             sample = (data, label)
 
         elif self.mode=='val':
-            data['potion'] = self.load_ucf_image(video_name)
-            
+            data['image'], data['heatmaps'], data['occlusion'], data['frameId'] = self.load_ucf_image(video_name)
             sample = (data, label)
         else:
             raise ValueError('There are only train and val mode')
@@ -94,33 +136,36 @@ class ucf_dataloader():
         
     def load_video_dict(self, ucf_list, ucf_split, train_split=0.6, val_split=0.2):
 
-        if os.path.isfile(VIDEO_DICT + "/video_dict.pickle"):
+        if os.path.isfile(VIDEO_DICT + "video_dict.pickle"):
             print("Loading existing video dictionary...")
-            with open('video_dict.pickle', 'rb') as handle:
+            with open(VIDEO_DICT + "video_dict.pickle", 'rb') as handle:
                 final_dic = pickle.load(handle)
 
         else:
             # split the training and testing videos
             print("Creating video dictionary...")
+            print(os.path.join(VIDEO_DICT + 'video_dict.pickle'))
+
             splitter = UCF101_splitter(path=ucf_list,split=ucf_split)
             train_video, val_video = splitter.split_video()
             final_dic = dict(list(train_video.items()) + list(val_video.items()))
 
-            print(os.path.join(VIDEO_DICT + '/video_dict.pickle'))
-            with open(os.path.join(VIDEO_DICT + '/video_dict.pickle'), 'wb') as handle:
+            with open(os.path.join(VIDEO_DICT + 'video_dict.pickle'), 'wb') as handle:
                 pickle.dump(final_dic, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         filter_dic = []
         #Filter for exisiting videos:
         for key, value in final_dic.items():
-            rgb = self.pose_path + "v_" + key
-            pose = self.rgb_path + "v_" + key
-
-            if os.path.isdir(rgb) and os.path.isdir(rgb):
+            rgb = self.rgb_path + "v_" + key
+            pose = self.pose_path + "v_" + key
+            
+            if os.path.isdir(rgb) and os.path.isdir(pose):
+                # print(rgb, pose)
                 filter_dic.append((key, value))
 
         n = len(filter_dic)
         np.random.shuffle(filter_dic)
+
         train_end = int(n*train_split)
         val_end = int(n*(train_split+val_split))
         train_video, val_video, test_video = dict(filter_dic[0:train_end]),\
@@ -197,5 +242,5 @@ if __name__ == '__main__':
     train_loader, val_loader, test_loader = dataloader.run()
     print(len(train_loader), len(val_loader), len(test_loader))
 
-    for data in test_loader:
-        print(data)
+    for data in tqdm(test_loader):
+        continue

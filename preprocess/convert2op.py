@@ -8,7 +8,7 @@ from tqdm import tqdm
 JSON_PATH = "/media/bighdd7/arayasam/dataset/UCF101/openpose_output/"
 CNV_POSE = "/media/bighdd1/arayasam/poseforecasting/preprocess/heatmaps/"
 
-def json_to_numpy():
+def convert():
     
     count = 0
     for video_name in tqdm(sorted(os.listdir(JSON_PATH))):
@@ -59,4 +59,4 @@ def json_to_numpy():
 
     
 if __name__ == "__main__":
-    json_to_numpy()
+    convert()
