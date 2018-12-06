@@ -18,6 +18,8 @@ class UCF101_splitter():
             if action not in self.action_label.keys():
                 self.action_label[action]=label
 
+        return self.action_label
+
     def split_video(self):
         self.get_action_index()
         for path,subdir,files in os.walk(self.path):
