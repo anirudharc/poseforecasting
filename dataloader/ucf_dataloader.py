@@ -242,5 +242,7 @@ if __name__ == '__main__':
     train_loader, val_loader, test_loader = dataloader.run()
     print(len(train_loader), len(val_loader), len(test_loader))
 
-    for data in tqdm(test_loader):
-        continue
+    # data is a dict: data['image'], data['heatmaps'], data['occlusion'], data['frameId']
+    # label is the action lable - integer starting at 0 (conversion file UCF_list/classInd.txt)
+    for data, label in tqdm(test_loader):
+        print(data, label)
