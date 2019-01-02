@@ -3,7 +3,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 import random
-from split_train_test_video import *
+#from split_train_test_video import *
 from skimage import io, color, exposure
 import cv2
 import os
@@ -11,6 +11,8 @@ import numpy as np
 import os.path
 import json as json
 from tqdm import tqdm
+import pdb
+from pathlib import Path
 
 BASE_DIR = os.getcwd()
 DATA_DIR = '/media/bighdd7/arayasam/dataset/UCF101'
@@ -40,10 +42,9 @@ class ucf_dataset(Dataset):
         return len(self.keys)
 
     def convert(self, pose_path, ht_path, video_name):
-        
         heatmap_path = os.path.join(ht_path,video_name) + ".npz"
-        video_path = POSE_DIR + "v_" + video_name
-
+        video_path = self.pose_dir + "v_" + video_name
+        
         if os.path.isfile(heatmap_path):
             data = np.load(heatmap_path)
             openpose_npy, occluion, frame_mask = data['heatmap'], \
@@ -128,34 +129,34 @@ class ucf_dataset(Dataset):
         return sample
 
 class ucf_dataloader():
-    def __init__(self, BATCH_SIZE, num_workers, rgb_path, pose_path, htmap_path, ucf_list, ucf_split):
+    def __init__(self, BATCH_SIZE, num_workers, rgb_path, pose_path, video_path, htmap_path, ucf_list, ucf_split):
 
         self.BATCH_SIZE=BATCH_SIZE
         self.num_workers=num_workers
         self.rgb_path=rgb_path
         self.pose_path=pose_path
+        self.video_path=video_path
         self.htmap_path=htmap_path
 
         self.frame_count={}
         self.train_video, self.val_video, self.test_video = self.load_video_dict(ucf_list, ucf_split)
         
     def load_video_dict(self, ucf_list, ucf_split, train_split=0.6, val_split=0.2):
-
-        if os.path.isfile(VIDEO_DICT + "video_dict.pickle"):
+        if os.path.isfile(self.video_path + "video_dict.pickle"):
             print("Loading existing video dictionary...")
-            with open(VIDEO_DICT + "video_dict.pickle", 'rb') as handle:
+            with open(self.video_path + "video_dict.pickle", 'rb') as handle:
                 final_dic = pickle.load(handle)
 
         else:
             # split the training and testing videos
             print("Creating video dictionary...")
-            print(os.path.join(VIDEO_DICT + 'video_dict.pickle'))
+            print(os.path.join(self.video_path + 'video_dict.pickle'))
 
             splitter = UCF101_splitter(path=ucf_list,split=ucf_split)
             train_video, val_video = splitter.split_video()
             final_dic = dict(list(train_video.items()) + list(val_video.items()))
 
-            with open(os.path.join(VIDEO_DICT + 'video_dict.pickle'), 'wb') as handle:
+            with open(os.path.join(self.video_path + 'video_dict.pickle'), 'wb') as handle:
                 pickle.dump(final_dic, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         filter_dic = []
@@ -163,8 +164,8 @@ class ucf_dataloader():
         for key, value in final_dic.items():
             rgb = self.rgb_path + "v_" + key
             pose = self.pose_path + "v_" + key
-            
-            if os.path.isdir(rgb) and os.path.isdir(pose):
+            heatmap = Path(self.htmap_path)/'v_{}.npz'.format(key)
+            if os.path.isdir(rgb) and os.path.isdir(pose) and os.path.isfile(heatmap):
                 # print(rgb, pose)
                 filter_dic.append((key, value))
 
@@ -245,6 +246,7 @@ if __name__ == '__main__':
     dataloader = ucf_dataloader(BATCH_SIZE=1, num_workers=1, 
                                 rgb_path=RGB_DIR,
                                 pose_path=POSE_DIR,
+                                video_path=VIDEO_DICT,
                                 htmap_path=CNV_POSE,
                                 ucf_list=UCF_LIST,
                                 ucf_split='01')
